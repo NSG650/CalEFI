@@ -386,10 +386,18 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\main.c" />
+    <None Include="..\..\debug.vbs" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\..\debug.vbs" />
+    <ClCompile Include="..\..\entry.c" />
+    <ClCompile Include="..\..\file.c" />
+    <ClCompile Include="..\..\paging.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\file.h" />
+    <ClInclude Include="..\..\paging.h" />
+    <ClInclude Include="..\..\pe64.h" />
+    <ClInclude Include="..\..\types.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
