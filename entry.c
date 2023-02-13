@@ -5,6 +5,9 @@
 #include <efistdarg.h> 
 #include "file.h"
 #include "pe64.h"
+#include "paging.h"
+
+#define HIGHER_HALF 0xffffffff80000000
 
 // Failing
 
@@ -58,23 +61,34 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
 		Panic(L"NT signature check failed :(\r\n");
 	}
 
-	Print(L"Entry point at 0x%lx\r\n", (pHeaders->OptionalHeader.AddressOfEntryPoint));
+	Print(L"Entry point at 0x%lx\r\n", (pHeaders->OptionalHeader.AddressOfEntryPoint + HIGHER_HALF));
 	WCHAR Name[IMAGE_SIZEOF_SHORT_NAME];
 	PIMAGE_SECTION_HEADER HeaderSection = IMAGE_FIRST_SECTION(pHeaders);
 
+	__writecr0(__readcr0() & ~(1 << 16)); // Fuck the write protection
+
+
+	PPAGEMAP CurPage = NULL;
+	BS->AllocatePages(AllocateAnyPages, EfiLoaderData, 1, &CurPage);
+	Print(L"CurPage: 0x%lx\n", CurPage);
+
 	for (int j = 0; j < pHeaders->FileHeader.NumberOfSections; j++) {
 		UINT64 SizeOfRawData = HeaderSection[j].SizeOfRawData;
-		UINT64 LoadAddress = HeaderSection[j].VirtualAddress;
+		UINT64 LoadAddress = HeaderSection[j].VirtualAddress + HIGHER_HALF;
+		VOID* Allocated = HeaderSection[j].VirtualAddress;
 		UINT64 PageCount = (SizeOfRawData + 0x1000 - 1) / 0x1000;
 		for (int i = 0; i < IMAGE_SIZEOF_SHORT_NAME; i++) {
 			Name[i] = (WCHAR)HeaderSection[j].Name[i];
 		}
-		SystemTable->BootServices->AllocatePages(AllocateAddress, EfiLoaderData, PageCount, LoadAddress);
+		SystemTable->BootServices->AllocatePages(AllocateAddress, EfiBootServicesData, PageCount, Allocated);
 		Print(L"Section name: %s\r\n", Name);
-		RtCopyMem((PUCHAR)LoadAddress, (PUCHAR)(((UINT64)pImage) + HeaderSection[j].PointerToRawData), SizeOfRawData);
+		RtCopyMem(Allocated, (PUCHAR)(((UINT64)pImage) + HeaderSection[j].PointerToRawData), SizeOfRawData);
+		for (int z = 0; z < SizeOfRawData; z += 0x1000) {
+			if (!PagingMapPage(CurPage, (UINT64)Allocated + z, LoadAddress + z, 0b11)) Panic(L"Failed to map the kernel :(\r\n");
+		}
 	}
 
-	VOID (*KernelStart)(VOID) = (VOID (*)(VOID))(pHeaders->OptionalHeader.AddressOfEntryPoint);
+	VOID (*KernelStart)(VOID) = (VOID (*)(VOID))(pHeaders->OptionalHeader.AddressOfEntryPoint + HIGHER_HALF);
 	KernelStart();
 
 	// if we made it here panic

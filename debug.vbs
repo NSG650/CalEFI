@@ -9,7 +9,7 @@
 ' Modify these variables as needed
 QEMU_PATH  = "C:\Program Files\qemu\"
 ' You can add something like "-S -gdb tcp:127.0.0.1:1234" if you plan to use gdb to debug
-QEMU_OPTS  = "-net none -monitor none -parallel none"
+QEMU_OPTS  = "-net none -monitor none -parallel none -serial stdio"
 ' Set to True if you need to download a file that might be cached locally
 NO_CACHE   = False
 
@@ -45,7 +45,7 @@ Else
   Call WScript.Quit(1)
 End If
 BOOT_NAME  = "boot" & UEFI_EXT & ".efi"
-QEMU_EXE   = "qemu-system-" & QEMU_ARCH & "w.exe"
+QEMU_EXE   = "qemu-system-" & QEMU_ARCH & ".exe"
 
 FW_ARCH = UCase(UEFI_EXT)
 FW_DIR  = "https://efi.akeo.ie/" & FW_BASE & "/"

@@ -3,6 +3,6 @@
 #include <efi.h>
 #include <efilib.h>
 
-typedef struct _PAGEMAP {
-	UINT64* Top;
-} PAGEMAP, PPAGEMAP;
+typedef UINT64 PAGEMAP, *PPAGEMAP;
+
+BOOLEAN PagingMapPage(PPAGEMAP Pagemap, UINT64 Phys, UINT64 Virt, UINT64 Flags);
