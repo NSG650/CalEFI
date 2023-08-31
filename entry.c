@@ -68,9 +68,26 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
 	__writecr0(__readcr0() & ~(1 << 16)); // Fuck the write protection
 
 
-	PPAGEMAP CurPage = NULL;
-	BS->AllocatePages(AllocateAnyPages, EfiLoaderData, 1, &CurPage);
+	UINTN                  MemoryMapSize = 0;
+	EFI_MEMORY_DESCRIPTOR* MemoryMap;
+	UINTN                  MapKey;
+	UINTN                  DescriptorSize;
+	UINT32                 DescriptorVersion;
+
+	BS->GetMemoryMap(&MemoryMapSize, MemoryMap, &MapKey, &DescriptorSize, &DescriptorVersion);
+	MemoryMapSize += 2 * DescriptorSize;
+	BS->AllocatePool(2, MemoryMapSize, (void**)&MemoryMap);
+	BS->GetMemoryMap(&MemoryMapSize, MemoryMap, &MapKey, &DescriptorSize, &DescriptorVersion);
+
+	
+	PPAGEMAP CurPage = __readcr3();
 	Print(L"CurPage: 0x%lx\n", CurPage);
+
+	for (UINT64 i = 0; i < (MemoryMapSize / DescriptorSize) / 2 + 1; i++) {
+		EFI_MEMORY_DESCRIPTOR* EfiEntry = (EFI_MEMORY_DESCRIPTOR*)((UINT64)MemoryMap + (i * DescriptorSize));
+		Print(L"Type %x Range 0x%lx - 0x%lx\n", EfiEntry->Type, EfiEntry->PhysicalStart, EfiEntry->PhysicalStart + (EfiEntry->NumberOfPages * EFI_PAGE_SIZE));
+	}
+
 
 	for (int j = 0; j < pHeaders->FileHeader.NumberOfSections; j++) {
 		UINT64 SizeOfRawData = HeaderSection[j].SizeOfRawData;
@@ -81,7 +98,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
 			Name[i] = (WCHAR)HeaderSection[j].Name[i];
 		}
 		SystemTable->BootServices->AllocatePages(AllocateAddress, EfiBootServicesData, PageCount, Allocated);
-		Print(L"Section name: %s\r\n", Name);
+		Print(L"Section name: %s from 0x%lx to 0x%lx\r\n", Name, LoadAddress, LoadAddress + SizeOfRawData);
 		RtCopyMem(Allocated, (PUCHAR)(((UINT64)pImage) + HeaderSection[j].PointerToRawData), SizeOfRawData);
 		for (int z = 0; z < SizeOfRawData; z += 0x1000) {
 			if (!PagingMapPage(CurPage, (UINT64)Allocated + z, LoadAddress + z, 0b11)) Panic(L"Failed to map the kernel :(\r\n");
