@@ -50,6 +50,7 @@ typedef struct HANDOVER_ {
 	FRAMEBUFFER Framebuffer;
 } HANDOVER, *PHANDOVER;
 
+extern void __fastcall JumpToKernel(UINT64 RCX, UINT64 RSP, UINT64 RIP);
 
 EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
 	UINTN Event;
@@ -171,12 +172,16 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
 		Handover->Framebuffer.Address = gop->Mode->FrameBufferBase;
 		Handover->Framebuffer.Height = gop->Mode->Info->VerticalResolution;
 		Handover->Framebuffer.Width = gop->Mode->Info->HorizontalResolution;
-		Handover->Framebuffer.Pitch = gop->Mode->Info->PixelsPerScanLine;
+		Handover->Framebuffer.Pitch = gop->Mode->Info->PixelsPerScanLine * 4;
 	}
 
+	VOID* Stack = NULL;
+	BS->AllocatePages(AllocateAnyPages, EfiRuntimeServicesData, (64 * 1024 / EFI_PAGE_SIZE) + 1, &Stack);
+	for (int z = 0; z < 64 * 1024; z += 0x1000) {
+		if (!PagingMapPage(CurPage, (UINT64)Stack + z, (UINT64)Stack + z, 0b11)) Panic(L"Failed to map the stack :(\r\n");
+	}
 
-	VOID (*KernelStart)(PHANDOVER) = (VOID (*)(PHANDOVER))(pHeaders->OptionalHeader.AddressOfEntryPoint + HIGHER_HALF);
-	KernelStart(Handover);
+	JumpToKernel(Handover, (UINT64)Stack + 64 * 1024, pHeaders->OptionalHeader.AddressOfEntryPoint + HIGHER_HALF);
 
 	// if we made it here panic
 
