@@ -6,7 +6,7 @@ STATIC PPAGEMAP PagingGetNextLevel(PPAGEMAP CurrLevel, UINT64 Entry) {
 		Ret = (PPAGEMAP*)(UINT64)(CurrLevel[Entry] & ~((UINT64)0xFFF));
 	}
 	else {
-		BS->AllocatePages(AllocateAnyPages, EfiLoaderData, 1, &Ret);
+		BS->AllocatePages(AllocateAnyPages, EfiRuntimeServicesData, 1, &Ret);
 		RtZeroMem(Ret, EFI_PAGE_SIZE);
 		CurrLevel[Entry] = (UINT64)Ret | 0b111;
 	}

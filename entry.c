@@ -24,6 +24,32 @@ VOID Panic(CONST CHAR16* fmt, ...) {
 	}
 }
 
+typedef struct _FRAMEBUFFER {
+	UINT64 Address;
+	UINT16 Width;
+	UINT16 Height;
+	UINT32 Pitch;
+} FRAMEBUFFER, PFRAMEBUFFER;
+
+typedef struct _MEM_DESC {
+	UINT64 Start;
+	UINT64 Size;
+} MEM_DESC, *PMEM_DESC;
+
+typedef struct _SECTIONS {
+	CHAR Name[16];
+	UINT64 PhysicalBase;
+	UINT64 VirtualBase;
+} SECTIONS, *PSECTIONS;
+
+typedef struct HANDOVER_ {
+	MEM_DESC MemEntry[128];
+	UINT64 EntryCount;
+	SECTIONS Sections[16];
+	UINT64 SectionCount;
+	FRAMEBUFFER Framebuffer;
+} HANDOVER, *PHANDOVER;
+
 
 EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
 	UINTN Event;
@@ -83,12 +109,33 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
 	PPAGEMAP CurPage = __readcr3();
 	Print(L"CurPage: 0x%lx\n", CurPage);
 
+	UINT64 MemSize = 0;
+
+	PHANDOVER Handover = NULL;
+	BS->AllocatePages(AllocateAnyPages, EfiRuntimeServicesData, ((sizeof(HANDOVER)) / EFI_PAGE_SIZE) + 1, &Handover);
+	RtZeroMem(Handover, sizeof(HANDOVER));
+
+	UINT64 MemHandoverCount = 0;
+	
 	for (UINT64 i = 0; i < (MemoryMapSize / DescriptorSize) / 2 + 1; i++) {
 		EFI_MEMORY_DESCRIPTOR* EfiEntry = (EFI_MEMORY_DESCRIPTOR*)((UINT64)MemoryMap + (i * DescriptorSize));
-		Print(L"Type %x Range 0x%lx - 0x%lx\n", EfiEntry->Type, EfiEntry->PhysicalStart, EfiEntry->PhysicalStart + (EfiEntry->NumberOfPages * EFI_PAGE_SIZE));
+		if (EfiEntry->Type == EfiConventionalMemory || EfiEntry->Type == EfiACPIReclaimMemory 
+			|| EfiEntry->Type == EfiBootServicesCode || EfiEntry->Type == EfiBootServicesData) {
+			Print(L"Type %x Range 0x%lx - 0x%lx\n", EfiEntry->Type, EfiEntry->PhysicalStart, EfiEntry->PhysicalStart + (EfiEntry->NumberOfPages * EFI_PAGE_SIZE));
+			
+			Handover->MemEntry[MemHandoverCount].Start = EfiEntry->PhysicalStart;
+			Handover->MemEntry[MemHandoverCount++].Size = ((EfiEntry->NumberOfPages * EFI_PAGE_SIZE));
+
+			MemSize += ((EfiEntry->NumberOfPages * EFI_PAGE_SIZE));
+		}
 	}
 
+	Handover->EntryCount = MemHandoverCount;
 
+
+	Print(L"Total memory in the system %llu\n", MemSize);
+
+	UINT64 SectionHandoverCount = 0;
 	for (int j = 0; j < pHeaders->FileHeader.NumberOfSections; j++) {
 		UINT64 SizeOfRawData = HeaderSection[j].SizeOfRawData;
 		UINT64 LoadAddress = HeaderSection[j].VirtualAddress + HIGHER_HALF;
@@ -97,16 +144,39 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
 		for (int i = 0; i < IMAGE_SIZEOF_SHORT_NAME; i++) {
 			Name[i] = (WCHAR)HeaderSection[j].Name[i];
 		}
-		SystemTable->BootServices->AllocatePages(AllocateAddress, EfiBootServicesData, PageCount, Allocated);
+		SystemTable->BootServices->AllocatePages(AllocateAnyPages, EfiBootServicesData, PageCount, Allocated);
 		Print(L"Section name: %s from 0x%lx to 0x%lx\r\n", Name, LoadAddress, LoadAddress + SizeOfRawData);
 		RtCopyMem(Allocated, (PUCHAR)(((UINT64)pImage) + HeaderSection[j].PointerToRawData), SizeOfRawData);
+
+		RtCopyMem(Handover->Sections[SectionHandoverCount].Name, HeaderSection[j].Name, 8);
+		Handover->Sections[SectionHandoverCount].PhysicalBase = Allocated;
+		Handover->Sections[SectionHandoverCount++].VirtualBase = LoadAddress;
+
 		for (int z = 0; z < SizeOfRawData; z += 0x1000) {
 			if (!PagingMapPage(CurPage, (UINT64)Allocated + z, LoadAddress + z, 0b11)) Panic(L"Failed to map the kernel :(\r\n");
 		}
 	}
 
-	VOID (*KernelStart)(VOID) = (VOID (*)(VOID))(pHeaders->OptionalHeader.AddressOfEntryPoint + HIGHER_HALF);
-	KernelStart();
+	Handover->SectionCount = SectionHandoverCount;
+
+	EFI_GUID gopGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
+	EFI_GRAPHICS_OUTPUT_PROTOCOL* gop;
+	EFI_STATUS status;
+
+	status = uefi_call_wrapper(BS->LocateProtocol, 3, &gopGuid, NULL, (void**)&gop);
+	if (EFI_ERROR(status)) {
+		Print(L"No GoP found but that's fine\n\r");
+	}
+	else {
+		Handover->Framebuffer.Address = gop->Mode->FrameBufferBase;
+		Handover->Framebuffer.Height = gop->Mode->Info->VerticalResolution;
+		Handover->Framebuffer.Width = gop->Mode->Info->HorizontalResolution;
+		Handover->Framebuffer.Pitch = gop->Mode->Info->PixelsPerScanLine;
+	}
+
+
+	VOID (*KernelStart)(PHANDOVER) = (VOID (*)(PHANDOVER))(pHeaders->OptionalHeader.AddressOfEntryPoint + HIGHER_HALF);
+	KernelStart(Handover);
 
 	// if we made it here panic
 
