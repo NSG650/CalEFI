@@ -8,6 +8,7 @@
 #include "paging.h"
 
 #define HIGHER_HALF 0xffffffff80000000
+#define MEM_PHYS_OFFSET 0xffff800000000000
 
 // Failing
 
@@ -43,7 +44,7 @@ typedef struct _SECTIONS {
 } SECTIONS, *PSECTIONS;
 
 typedef struct HANDOVER_ {
-	MEM_DESC MemEntry[128];
+	MEM_DESC MemEntry[1024];
 	UINT64 EntryCount;
 	SECTIONS Sections[16];
 	UINT64 SectionCount;
@@ -106,7 +107,6 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
 	BS->AllocatePool(2, MemoryMapSize, (void**)&MemoryMap);
 	BS->GetMemoryMap(&MemoryMapSize, MemoryMap, &MapKey, &DescriptorSize, &DescriptorVersion);
 
-	
 	PPAGEMAP CurPage = __readcr3();
 	Print(L"CurPage: 0x%lx\n", CurPage);
 
@@ -122,7 +122,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
 		EFI_MEMORY_DESCRIPTOR* EfiEntry = (EFI_MEMORY_DESCRIPTOR*)((UINT64)MemoryMap + (i * DescriptorSize));
 		if (EfiEntry->Type == EfiConventionalMemory || EfiEntry->Type == EfiACPIReclaimMemory 
 			|| EfiEntry->Type == EfiBootServicesCode || EfiEntry->Type == EfiBootServicesData) {
-			Print(L"Type %x Range 0x%lx - 0x%lx\n", EfiEntry->Type, EfiEntry->PhysicalStart, EfiEntry->PhysicalStart + (EfiEntry->NumberOfPages * EFI_PAGE_SIZE));
+//			Print(L"Type %x Range 0x%lx - 0x%lx\n", EfiEntry->Type, EfiEntry->PhysicalStart, EfiEntry->PhysicalStart + (EfiEntry->NumberOfPages * EFI_PAGE_SIZE));
 			
 			Handover->MemEntry[MemHandoverCount].Start = EfiEntry->PhysicalStart;
 			Handover->MemEntry[MemHandoverCount++].Size = ((EfiEntry->NumberOfPages * EFI_PAGE_SIZE));
@@ -145,7 +145,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
 		for (int i = 0; i < IMAGE_SIZEOF_SHORT_NAME; i++) {
 			Name[i] = (WCHAR)HeaderSection[j].Name[i];
 		}
-		SystemTable->BootServices->AllocatePages(AllocateAnyPages, EfiBootServicesData, PageCount, Allocated);
+		SystemTable->BootServices->AllocatePages(AllocateAnyPages, EfiRuntimeServicesData, PageCount, Allocated);
 		Print(L"Section name: %s from 0x%lx to 0x%lx\r\n", Name, LoadAddress, LoadAddress + SizeOfRawData);
 		RtCopyMem(Allocated, (PUCHAR)(((UINT64)pImage) + HeaderSection[j].PointerToRawData), SizeOfRawData);
 
@@ -177,11 +177,17 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
 
 	VOID* Stack = NULL;
 	BS->AllocatePages(AllocateAnyPages, EfiRuntimeServicesData, (64 * 1024 / EFI_PAGE_SIZE) + 1, &Stack);
-	for (int z = 0; z < 64 * 1024; z += 0x1000) {
-		if (!PagingMapPage(CurPage, (UINT64)Stack + z, (UINT64)Stack + z, 0b11)) Panic(L"Failed to map the stack :(\r\n");
+	for (int z = 0; z <= (64 * 1024); z += 0x1000) {
+		if (!PagingMapPage(CurPage, (UINT64)Stack + z, (UINT64)Stack + z + MEM_PHYS_OFFSET, 0b11)) Panic(L"Failed to map the stack :(\r\n");
 	}
 
-	JumpToKernel(Handover, (UINT64)Stack + 64 * 1024, pHeaders->OptionalHeader.AddressOfEntryPoint + HIGHER_HALF);
+	for (int z = 0; z < sizeof(HANDOVER); z += 0x1000) {
+		if (!PagingMapPage(CurPage, (UINT64)Handover + z, (UINT64)Handover + z + MEM_PHYS_OFFSET, 0b11)) Panic(L"Failed to map the handover :(\r\n");
+	}
+
+	SystemTable->BootServices->ExitBootServices(ImageHandle, &MapKey);
+
+	JumpToKernel((UINT64)Handover + MEM_PHYS_OFFSET, (UINT64)(Stack) + MEM_PHYS_OFFSET + (64 * 1024), pHeaders->OptionalHeader.AddressOfEntryPoint + HIGHER_HALF);
 
 	// if we made it here panic
 
