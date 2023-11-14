@@ -122,6 +122,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
 		EFI_MEMORY_DESCRIPTOR* EfiEntry = (EFI_MEMORY_DESCRIPTOR*)((UINT64)MemoryMap + (i * DescriptorSize));
 		if (EfiEntry->Type == EfiConventionalMemory || EfiEntry->Type == EfiACPIReclaimMemory 
 			|| EfiEntry->Type == EfiBootServicesCode || EfiEntry->Type == EfiBootServicesData) {
+			
 //			Print(L"Type %x Range 0x%lx - 0x%lx\n", EfiEntry->Type, EfiEntry->PhysicalStart, EfiEntry->PhysicalStart + (EfiEntry->NumberOfPages * EFI_PAGE_SIZE));
 			
 			Handover->MemEntry[MemHandoverCount].Start = EfiEntry->PhysicalStart;
@@ -134,7 +135,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
 	Handover->EntryCount = MemHandoverCount;
 
 
-	Print(L"Total memory in the system %llu\n", MemSize);
+	Print(L"Total memory in the system %llu MB\n", MemSize / (1024 * 1024));
 
 	UINT64 SectionHandoverCount = 0;
 	for (int j = 0; j < pHeaders->FileHeader.NumberOfSections; j++) {
